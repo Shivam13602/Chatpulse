@@ -1,1 +1,7 @@
 .qodo
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+lambda_packages/
+node_modules/

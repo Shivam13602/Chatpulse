@@ -1,0 +1,1 @@
+{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Resource":"arn:aws:s3:::realtime-chat-app-20250323012214/*","Action":"s3:GetObject"}]}

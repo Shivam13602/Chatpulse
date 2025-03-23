@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 Bucket for Real-Time Chat Application'
+
+Parameters:
+  S3BucketName:
+    Description: Name of the S3 bucket for deployment artifacts and frontend hosting
+    Type: String
+
+Resources:
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+Outputs:
+  BucketName:
+    Description: Name of the created S3 bucket
+    Value: !Ref WebsiteBucket 

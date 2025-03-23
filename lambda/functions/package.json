@@ -1,7 +1,7 @@
 {
   "name": "real-time-chat-lambda-functions",
   "version": "1.0.0",
-  "description": "Lambda functions for real-time chat application with sentiment analysis",
+  "description": "Lambda functions for Real-Time Chat Application with Sentiment Analysis",
   "main": "message_processor.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -9,7 +9,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "aws-sdk": "^2.1527.0",
-    "uuid": "^9.0.1"
+    "aws-sdk": "^2.1049.0",
+    "uuid": "^8.3.2"
   }
 } 

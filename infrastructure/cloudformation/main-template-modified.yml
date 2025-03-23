@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Real-Time Chat Application with Sentiment Analysis - Main Template'
+Description: 'Real-Time Chat Application with Sentiment Analysis - Main Template for AWS Academy (using LabRole)'
 
 Parameters:
   EnvironmentName:
@@ -8,7 +8,7 @@ Parameters:
     Default: Dev
   
   S3BucketName:
-    Description: Name of the S3 bucket for deployment artifacts and frontend hosting
+    Description: Name of the existing S3 bucket for deployment artifacts and frontend hosting
     Type: String
 
 Resources:
@@ -155,14 +155,14 @@ Resources:
       AutoDeploy: true
 
   # ========================================================================
-  # Lambda Functions
+  # Lambda Functions (using existing LabRole)
   # ========================================================================
   ConnectionManagerFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub '${EnvironmentName}-chat-connection-manager'
       Handler: connection_manager.lambda_handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/LabRole'
       Runtime: python3.9
       Timeout: 30
       MemorySize: 256
@@ -179,7 +179,7 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-chat-message-processor'
       Handler: message_processor.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/LabRole'
       Runtime: nodejs16.x
       Timeout: 30
       MemorySize: 256
@@ -197,7 +197,7 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-chat-default-handler'
       Handler: default_handler.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/LabRole'
       Runtime: nodejs16.x
       Timeout: 30
       MemorySize: 256
@@ -241,51 +241,8 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*/*"
 
-  # ========================================================================
-  # IAM Roles
-  # ========================================================================
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub '${EnvironmentName}-chat-lambda-role'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Scan
-                  - dynamodb:Query
-                Resource:
-                  - !GetAtt ConnectionsTable.Arn
-                  - !GetAtt MessagesTable.Arn
-        - PolicyName: WebSocketManagement
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - execute-api:ManageConnections
-                Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*"
+  # Note: S3 bucket is not created by this template, it's expected to exist already
 
-  # ========================================================================
-  # Frontend Hosting - No public policy due to AWS Academy restrictions
-  # ========================================================================
-            
 Outputs:
   WebSocketURL:
     Description: WebSocket URL for client connections
@@ -293,7 +250,7 @@ Outputs:
     
   FrontendURL:
     Description: URL for the frontend website
-    Value: !Sub "http://${S3BucketName}.s3-website-${AWS::Region}.amazonaws.com/frontend/index.html"
+    Value: !Sub "http://${S3BucketName}.s3-website-${AWS::Region}.amazonaws.com/index.html"
     
   ConnectionsTableName:
     Description: DynamoDB table for WebSocket connections
