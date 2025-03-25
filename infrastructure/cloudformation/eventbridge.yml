@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for EventBridge integration with the chat application'
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name for resource naming (e.g., Dev, Test, Prod)
+    Type: String
+    Default: Prod
+  
+  MessageProcessorLambdaArn:
+    Description: ARN of the Lambda function that processes messages
+    Type: String
+  
+  BroadcastLambdaArn:
+    Description: ARN of the Lambda function that broadcasts messages
+    Type: String
+
+Resources:
+  # EventBridge Event Bus
+  ChatEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${EnvironmentName}-chat-events
+  
+  # EventBridge Rules for Message Events
+  MessageCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${EnvironmentName}-message-created
+      Description: 'Rule that triggers when a new message is created'
+      EventBusName: !Ref ChatEventBus
+      EventPattern:
+        source:
+          - 'chat.application'
+        detail-type:
+          - 'MessageCreated'
+      State: ENABLED
+      Targets:
+        - Id: 'BroadcastTarget'
+          Arn: !Ref BroadcastLambdaArn
+  
+  SentimentAnalysisCompletedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${EnvironmentName}-sentiment-analysis-completed
+      Description: 'Rule that triggers when sentiment analysis is completed'
+      EventBusName: !Ref ChatEventBus
+      EventPattern:
+        source:
+          - 'chat.application'
+        detail-type:
+          - 'SentimentAnalysisCompleted'
+      State: ENABLED
+      Targets:
+        - Id: 'MessageProcessorTarget'
+          Arn: !Ref MessageProcessorLambdaArn
+  
+  # EventBridge Rule for Model Training Events
+  ModelTrainingCompletedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${EnvironmentName}-model-training-completed
+      Description: 'Rule that triggers when model training is completed'
+      EventBusName: !Ref ChatEventBus
+      EventPattern:
+        source:
+          - 'chat.application'
+        detail-type:
+          - 'ModelTrainingCompleted'
+      State: ENABLED
+      Targets:
+        - Id: 'MessageProcessorTarget'
+          Arn: !Ref MessageProcessorLambdaArn
+
+  # EventBridge Permissions
+  MessageProcessorPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MessageProcessorLambdaArn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SentimentAnalysisCompletedRule.Arn
+  
+  ModelTrainingPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MessageProcessorLambdaArn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ModelTrainingCompletedRule.Arn
+  
+  BroadcastPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BroadcastLambdaArn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MessageCreatedRule.Arn
+
+Outputs:
+  ChatEventBusName:
+    Description: Name of the EventBridge event bus
+    Value: !Ref ChatEventBus
+  
+  MessageCreatedRuleArn:
+    Description: ARN of the rule for message created events
+    Value: !GetAtt MessageCreatedRule.Arn
+  
+  SentimentAnalysisCompletedRuleArn:
+    Description: ARN of the rule for sentiment analysis completed events
+    Value: !GetAtt SentimentAnalysisCompletedRule.Arn
+  
+  ModelTrainingCompletedRuleArn:
+    Description: ARN of the rule for model training completed events
+    Value: !GetAtt ModelTrainingCompletedRule.Arn 

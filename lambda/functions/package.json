@@ -1,15 +1,15 @@
 {
-  "name": "real-time-chat-lambda-functions",
+  "name": "chat-message-processor",
   "version": "1.0.0",
-  "description": "Lambda functions for real-time chat application with sentiment analysis",
+  "description": "Lambda function for processing WebSocket messages in a chat application",
   "main": "message_processor.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "MIT",
   "dependencies": {
-    "aws-sdk": "^2.1527.0",
-    "uuid": "^9.0.1"
-  }
-} 
+    "chat-message-processor": "file:",
+    "uuid": "^8.3.2"
+  },
+  "author": "",
+  "license": "ISC"
+}

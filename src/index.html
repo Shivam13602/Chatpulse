@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Chat with Sentiment Analysis</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f7f9;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .header {
+      background-color: #4a69bd;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+    }
+    .demo-notice {
+      background-color: #ff7979;
+      color: white;
+      padding: 0.5rem;
+      text-align: center;
+      display: none;
+    }
+    .demo-notice.active {
+      display: block;
+    }
+    .container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 1rem;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      background-color: white;
+      width: 100%;
+    }
+    .connection-status {
+      padding: 0.5rem;
+      margin-bottom: 1rem;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+    }
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 8px;
+      background-color: #95a5a6;
+    }
+    .connected .status-indicator {
+      background-color: #2ecc71;
+    }
+    .connecting .status-indicator {
+      background-color: #f39c12;
+      animation: blink 1s infinite;
+    }
+    .disconnected .status-indicator {
+      background-color: #e74c3c;
+    }
+    @keyframes blink {
+      50% { opacity: 0.5; }
+    }
+    .chat-window {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      background-color: #f8f9fa;
+    }
+    .message {
+      margin-bottom: 1rem;
+      padding: 0.75rem;
+      border-radius: 4px;
+      max-width: 80%;
+      word-break: break-word;
+    }
+    .message.user {
+      background-color: #d1e6fa;
+      align-self: flex-end;
+      margin-left: auto;
+    }
+    .message.other {
+      background-color: #e9e9e9;
+      align-self: flex-start;
+    }
+    .message.positive {
+      border-left: 4px solid #2ecc71;
+    }
+    .message.negative {
+      border-left: 4px solid #e74c3c;
+    }
+    .message.neutral {
+      border-left: 4px solid #95a5a6;
+    }
+    .message-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+      font-size: 0.8rem;
+      color: #7f8c8d;
+    }
+    .username {
+      font-weight: bold;
+      color: #2c3e50;
+    }
+    .timestamp {
+      color: #95a5a6;
+    }
+    .sentiment-badge {
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-left: 5px;
+    }
+    .sentiment-positive {
+      background-color: rgba(46, 204, 113, 0.2);
+      color: #27ae60;
+    }
+    .sentiment-negative {
+      background-color: rgba(231, 76, 60, 0.2);
+      color: #c0392b;
+    }
+    .sentiment-neutral {
+      background-color: rgba(149, 165, 166, 0.2);
+      color: #7f8c8d;
+    }
+    .user-input {
+      display: flex;
+      flex-direction: column;
+    }
+    .username-input {
+      display: flex;
+      margin-bottom: 1rem;
+    }
+    .message-input {
+      display: flex;
+    }
+    input, button {
+      padding: 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: inherit;
+    }
+    input {
+      flex: 1;
+      margin-right: 0.5rem;
+    }
+    button {
+      background-color: #4a69bd;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #3c59a7;
+    }
+    button:disabled {
+      background-color: #95a5a6;
+      cursor: not-allowed;
+    }
+    .error-message {
+      color: #e74c3c;
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .system-message {
+      text-align: center;
+      margin: 0.5rem 0;
+      font-size: 0.9rem;
+      color: #7f8c8d;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Real-Time Chat</h1>
+  </div>
+  
+  <div class="demo-notice" id="demoNotice">
+    <strong>DEMO MODE:</strong> This is a demo showing the UI only. Backend functionality is not available in AWS Academy.
+  </div>
+  
+  <div class="container">
+    <div id="connectionStatus" class="connection-status disconnected">
+      <div class="status-indicator"></div>
+      <span id="statusText">Disconnected</span>
+    </div>
+    
+    <div id="chatWindow" class="chat-window">
+      <!-- Messages will be displayed here -->
+      <div class="system-message">Welcome to the Real-Time Chat with Sentiment Analysis</div>
+    </div>
+    
+    <div class="user-input">
+      <div class="username-input">
+        <input type="text" id="usernameInput" placeholder="Enter your username" />
+        <button id="connectButton">Connect</button>
+      </div>
+      
+      <div class="message-input">
+        <input type="text" id="messageInput" placeholder="Type your message..." disabled />
+        <button id="sendButton" disabled>Send</button>
+      </div>
+      <div id="errorMessage" class="error-message"></div>
+    </div>
+  </div>
+
+  <script>
+    // DOM elements
+    const demoNotice = document.getElementById('demoNotice');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const statusText = document.getElementById('statusText');
+    const chatWindow = document.getElementById('chatWindow');
+    const usernameInput = document.getElementById('usernameInput');
+    const connectButton = document.getElementById('connectButton');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const errorMessage = document.getElementById('errorMessage');
+    
+    // Configuration
+    const isDemoMode = false; // Set to true for demo mode
+    
+    // WebSocket endpoint (replaced during deployment)
+    const WEBSOCKET_ENDPOINT = "wss://haq5j7myy4.execute-api.us-west-2.amazonaws.com/prod";
+    
+    let socket = null;
+    let username = '';
+    let isConnected = false;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
+    
+    // Demo mode data
+    const demoUsers = [
+      { id: 'user1', name: 'Alice' },
+      { id: 'user2', name: 'Bob' },
+      { id: 'user3', name: 'Charlie' },
+      { id: 'user4', name: 'Diana' }
+    ];
+    
+    const demoMessages = [
+      { 
+        id: 'm1', 
+        userId: 'user1', 
+        username: 'Alice', 
+        content: 'Hello everyone! I\'m excited to try this new chat application!', 
+        sentiment: 1.2,
+        timestamp: Date.now() - (60000 * 10) // 10 minutes ago
+      },
+      { 
+        id: 'm2', 
+        userId: 'user2', 
+        username: 'Bob', 
+        content: 'Welcome Alice! This chat app has sentiment analysis, it\'s pretty cool.', 
+        sentiment: 0.8,
+        timestamp: Date.now() - (60000 * 9) // 9 minutes ago
+      },
+      { 
+        id: 'm3', 
+        userId: 'user3', 
+        username: 'Charlie', 
+        content: 'I\'m frustrated with my code today, nothing is working right.', 
+        sentiment: -1.0,
+        timestamp: Date.now() - (60000 * 8) // 8 minutes ago
+      },
+      { 
+        id: 'm4', 
+        userId: 'user1', 
+        username: 'Alice', 
+        content: 'Sorry to hear that Charlie. Maybe I can help? What are you working on?', 
+        sentiment: 0.5,
+        timestamp: Date.now() - (60000 * 7) // 7 minutes ago
+      },
+      { 
+        id: 'm5', 
+        userId: 'user3', 
+        username: 'Charlie', 
+        content: 'Thanks Alice, that\'s very kind of you. I\'m trying to deploy a cloud application.', 
+        sentiment: 0.7,
+        timestamp: Date.now() - (60000 * 6) // 6 minutes ago
+      },
+      { 
+        id: 'm6', 
+        userId: 'user4', 
+        username: 'Diana', 
+        content: 'Hello everyone! This is my first time here.', 
+        sentiment: 0.3,
+        timestamp: Date.now() - (60000 * 5) // 5 minutes ago
+      },
+      { 
+        id: 'm7', 
+        userId: 'user2', 
+        username: 'Bob', 
+        content: 'The sentiment analysis in this chat is amazing! I love how it shows the emotion in messages.', 
+        sentiment: 1.5,
+        timestamp: Date.now() - (60000 * 4) // 4 minutes ago
+      },
+      { 
+        id: 'm8', 
+        userId: 'user3', 
+        username: 'Charlie', 
+        content: 'I hate when cloud services have permission issues, it\'s so annoying!', 
+        sentiment: -1.8,
+        timestamp: Date.now() - (60000 * 3) // 3 minutes ago
+      }
+    ];
+    
+    // Initialize application
+    function init() {
+      // Check if in demo mode
+      if (isDemoMode) {
+        activateDemoMode();
+      }
+      
+      // Event listeners
+      connectButton.addEventListener('click', handleConnect);
+      sendButton.addEventListener('click', handleSendMessage);
+      messageInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') {
+          handleSendMessage();
+        }
+      });
+    }
+    
+    // Activate demo mode
+    function activateDemoMode() {
+      demoNotice.classList.add('active');
+      
+      // Display demo messages
+      setTimeout(() => {
+        demoMessages.forEach(message => {
+          displayMessage(message);
+        });
+      }, 1000);
+      
+      // Override connection handler for demo
+      connectButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        
+        if (!usernameInput.value.trim()) {
+          showError('Please enter a username');
+          return;
+        }
+        
+        username = usernameInput.value.trim();
+        
+        // Simulate connecting
+        updateConnectionStatus('connecting');
+        
+        setTimeout(() => {
+          updateConnectionStatus('connected');
+          enableChat();
+          
+          // Add system message
+          displaySystemMessage(`${username} has joined the chat`);
+          
+          // Add user to demo users
+          demoUsers.push({ id: 'currentUser', name: username });
+          
+        }, 1500);
+      }, { once: true });
+      
+      // Override send handler for demo
+      sendButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        
+        const text = messageInput.value.trim();
+        if (!text) return;
+        
+        // Clear input
+        messageInput.value = '';
+        
+        // Analyze sentiment of message (simple demo version)
+        const sentiment = analyzeTextSentiment(text);
+        
+        // Create message object
+        const message = {
+          id: 'msg_' + Date.now(),
+          userId: 'currentUser',
+          username: username,
+          content: text,
+          sentiment: sentiment,
+          timestamp: Date.now()
+        };
+        
+        // Display the message
+        displayMessage(message);
+        
+        // Simulate a response after a delay
+        setTimeout(() => {
+          const randomUser = demoUsers[Math.floor(Math.random() * (demoUsers.length - 1))]; // Exclude current user
+          const responses = [
+            `That's interesting, ${username}!`,
+            `I see what you mean.`,
+            `Thanks for sharing that.`,
+            `I have a different perspective on that.`,
+            `Could you explain more about that?`
+          ];
+          const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+          
+          const responseMessage = {
+            id: 'resp_' + Date.now(),
+            userId: randomUser.id,
+            username: randomUser.name,
+            content: randomResponse,
+            sentiment: analyzeTextSentiment(randomResponse),
+            timestamp: Date.now()
+          };
+          
+          displayMessage(responseMessage);
+        }, 2000 + Math.random() * 2000);
+      }, { once: false });
+    }
+    
+    // Simple sentiment analysis for demo mode
+    function analyzeTextSentiment(text) {
+      const positiveWords = ['good', 'great', 'excellent', 'happy', 'love', 'like', 'amazing', 'wonderful', 'best', 'awesome'];
+      const negativeWords = ['bad', 'terrible', 'awful', 'sad', 'hate', 'dislike', 'horrible', 'worst', 'annoying', 'frustrating'];
+      
+      const words = text.toLowerCase().split(/\s+/);
+      let score = 0;
+      
+      words.forEach(word => {
+        if (positiveWords.includes(word)) score += 0.5;
+        if (negativeWords.includes(word)) score -= 0.5;
+      });
+      
+      return score;
+    }
+    
+    // Handle connect button click
+    function handleConnect() {
+      if (isConnected) {
+        disconnect();
+        return;
+      }
+      
+      username = usernameInput.value.trim();
+      if (!username) {
+        showError('Please enter a username');
+        return;
+      }
+      
+      connect();
+    }
+    
+    // Connect to WebSocket
+    function connect() {
+      try {
+        updateConnectionStatus('connecting');
+        
+        const wsUrl = `${WEBSOCKET_ENDPOINT}?username=${encodeURIComponent(username)}`;
+        socket = new WebSocket(wsUrl);
+        
+        socket.onopen = () => {
+          isConnected = true;
+          updateConnectionStatus('connected');
+          updateConnectButton();
+          enableChat();
+          clearError();
+          reconnectAttempts = 0;
+          
+          // Log connection
+          console.log('Connected to WebSocket server');
+        };
+        
+        socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+          } catch (err) {
+            console.error('Error parsing message:', err);
+          }
+        };
+        
+        socket.onclose = (event) => {
+          isConnected = false;
+          updateConnectionStatus('disconnected');
+          updateConnectButton();
+          disableChat();
+          
+          // Log disconnection
+          console.log(`WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
+          
+          // Try to reconnect
+          if (reconnectAttempts < maxReconnectAttempts) {
+            reconnectAttempts++;
+            const delay = Math.min(1000 * (2 ** reconnectAttempts), 30000);
+            displaySystemMessage(`Connection lost. Reconnecting in ${delay/1000} seconds... (Attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+            
+            setTimeout(() => {
+              if (!isConnected) connect();
+            }, delay);
+          } else {
+            displaySystemMessage('Could not reconnect to server after multiple attempts. Please try again later.');
+          }
+        };
+        
+        socket.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          showError('Connection error. Please try again later.');
+        };
+        
+      } catch (err) {
+        updateConnectionStatus('disconnected');
+        showError(`Failed to connect: ${err.message}`);
+        console.error('Connection error:', err);
+      }
+    }
+    
+    // Disconnect from WebSocket
+    function disconnect() {
+      if (socket) {
+        socket.close(1000, 'User initiated disconnect');
+      }
+      
+      isConnected = false;
+      updateConnectionStatus('disconnected');
+      updateConnectButton();
+      disableChat();
+      displaySystemMessage(`${username} has left the chat`);
+    }
+    
+    // Handle incoming WebSocket messages
+    function handleWebSocketMessage(data) {
+      if (data.type === 'message') {
+        displayMessage(data.data);
+      } else if (data.type === 'system') {
+        displaySystemMessage(data.data.message);
+      } else if (data.type === 'error') {
+        showError(data.data.message);
+      }
+    }
+    
+    // Handle send message button click
+    function handleSendMessage() {
+      const text = messageInput.value.trim();
+      if (!text || !isConnected) return;
+      
+      // Clear input
+      messageInput.value = '';
+      
+      // Send message via WebSocket
+      const message = {
+        action: 'sendMessage',
+        data: text,
+        userId: username
+      };
+      
+      try {
+        socket.send(JSON.stringify(message));
+      } catch (err) {
+        showError(`Failed to send message: ${err.message}`);
+        console.error('Send error:', err);
+      }
+    }
+    
+    // Display a message in the chat window
+    function displayMessage(message) {
+      const messageEl = document.createElement('div');
+      messageEl.className = 'message';
+      
+      // Add sentiment class
+      if (message.sentiment > 0.5) {
+        messageEl.classList.add('positive');
+      } else if (message.sentiment < -0.5) {
+        messageEl.classList.add('negative');
+      } else {
+        messageEl.classList.add('neutral');
+      }
+      
+      // Add user/other class
+      if (message.userId === 'currentUser' || message.username === username) {
+        messageEl.classList.add('user');
+      } else {
+        messageEl.classList.add('other');
+      }
+      
+      // Format timestamp
+      const timestamp = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      // Determine sentiment text
+      let sentimentText = 'Neutral';
+      let sentimentClass = 'sentiment-neutral';
+      if (message.sentiment > 0.5) {
+        sentimentText = 'Positive';
+        sentimentClass = 'sentiment-positive';
+      } else if (message.sentiment < -0.5) {
+        sentimentText = 'Negative';
+        sentimentClass = 'sentiment-negative';
+      }
+      
+      // Create message content
+      messageEl.innerHTML = `
+        <div class="message-header">
+          <span class="username">${message.username}</span>
+          <span class="timestamp">${timestamp}</span>
+        </div>
+        <div class="message-content">${message.content}</div>
+        <div class="message-footer">
+          <span class="sentiment-badge ${sentimentClass}">${sentimentText}</span>
+        </div>
+      `;
+      
+      // Append to chat window
+      chatWindow.appendChild(messageEl);
+      
+      // Scroll to bottom
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+    
+    // Display a system message in the chat window
+    function displaySystemMessage(message) {
+      const messageEl = document.createElement('div');
+      messageEl.className = 'system-message';
+      messageEl.textContent = message;
+      
+      // Append to chat window
+      chatWindow.appendChild(messageEl);
+      
+      // Scroll to bottom
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+    
+    // Update the connection status display
+    function updateConnectionStatus(status) {
+      connectionStatus.className = `connection-status ${status}`;
+      
+      switch (status) {
+        case 'connected':
+          statusText.textContent = 'Connected';
+          break;
+        case 'connecting':
+          statusText.textContent = 'Connecting...';
+          break;
+        case 'disconnected':
+          statusText.textContent = 'Disconnected';
+          break;
+      }
+    }
+    
+    // Update the connect button text based on connection state
+    function updateConnectButton() {
+      connectButton.textContent = isConnected ? 'Disconnect' : 'Connect';
+    }
+    
+    // Enable chat input
+    function enableChat() {
+      messageInput.disabled = false;
+      sendButton.disabled = false;
+      messageInput.focus();
+    }
+    
+    // Disable chat input
+    function disableChat() {
+      messageInput.disabled = true;
+      sendButton.disabled = true;
+    }
+    
+    // Show error message
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.style.display = 'block';
+      
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        clearError();
+      }, 5000);
+    }
+    
+    // Clear error message
+    function clearError() {
+      errorMessage.textContent = '';
+      errorMessage.style.display = 'none';
+    }
+    
+    // Initialize the application
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html> 

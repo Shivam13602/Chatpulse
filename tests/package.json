@@ -1,14 +1,1 @@
-{
-  "name": "real-time-chat-tests",
-  "version": "1.0.0",
-  "description": "Test scripts for the Real-Time Chat Application",
-  "main": "test-websocket.js",
-  "scripts": {
-    "test-websocket": "node test-websocket.js"
-  },
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "ws": "^8.15.1"
-  }
-} 
+﻿{"name":"real-time-chat-app-tests","version":"1.0.0","description":"Test scripts for Real-Time Chat Application with Sentiment Analysis","main":"multi_user_test.js","scripts":{"test":"node multi_user_test.js","test:websocket":"node websocket_test.js"},"dependencies":{"ws":"^8.13.0"}}

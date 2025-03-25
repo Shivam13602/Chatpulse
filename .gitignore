@@ -1,1 +1,26 @@
-.qodo
+# Node modules
+node_modules/
+
+# Package directories
+temp/
+backup_files/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+
+# Lambda deployment packages
+*.zip
+
+# IDE directories
+.idea/
+.vscode/
+
+# AWS SAM
+.aws-sam/
+
+# Logs
+*.log 

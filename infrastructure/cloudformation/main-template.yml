@@ -1,72 +1,38 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Real-Time Chat Application with Sentiment Analysis - Main Infrastructure'
+Description: 'Real-Time Chat Application with Sentiment Analysis - Main Template for AWS Academy (using LabRole)'
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name for resource naming (e.g., Dev, Test, Prod)
+    Type: String
+    Default: Prod
+  
+  S3BucketName:
+    Description: Name of the existing S3 bucket for deployment artifacts and frontend hosting
+    Type: String
+  
+  EC2InstanceType:
+    Description: EC2 instance type for model training
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t3.micro
+  
+  AdminEmail:
+    Description: Email address for notifications and alerts
+    Type: String
+    Default: admin@example.com
 
 Resources:
-  # IAM Roles
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
-        - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
-        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
-
-  EC2S3AccessRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
-
-  APIGatewayLambdaInvokeRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: apigateway.amazonaws.com
-            Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: LambdaInvokePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: 'lambda:InvokeFunction'
-                Resource: '*'
-
-  # S3 Bucket
-  ChatStorageBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub 'real-time-chat-storage-${AWS::AccountId}'
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-
+  # ========================================================================
   # DynamoDB Tables
+  # ========================================================================
   ConnectionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: ConnectionsTable
+      TableName: !Sub '${EnvironmentName}-chat-connections'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: connectionId
@@ -74,327 +40,94 @@ Resources:
       KeySchema:
         - AttributeName: connectionId
           KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   MessagesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: MessagesTable
+      TableName: !Sub '${EnvironmentName}-chat-messages'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: messageId
           AttributeType: S
-        - AttributeName: timestamp
-          AttributeType: N
       KeySchema:
         - AttributeName: messageId
           KeyType: HASH
-      GlobalSecondaryIndexes:
-        - IndexName: TimestampIndex
-          KeySchema:
-            - AttributeName: timestamp
-              KeyType: HASH
-          Projection:
-            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
-  # EC2 Instance for Model Training
-  ModelTrainingInstance:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t3.micro
-      ImageId: ami-0889a44b331db0194  # Amazon Linux 2023 AMI (update with correct AMI for your region)
-      IamInstanceProfile: !Ref EC2InstanceProfile
-      SecurityGroups:
-        - !Ref ModelTrainingSecurityGroup
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          yum update -y
-          yum install -y git python3
-          pip3 install boto3
-          mkdir -p /home/ec2-user/model-training
-          cat > /home/ec2-user/model-training/retrain_model.py << 'EOF'
-          import boto3
-          import datetime
-
-          def retrain():
-              # Placeholder for model retraining logic
-              print("Retraining model...")
-
-          if __name__ == "__main__":
-              retrain()
-              # Upload the updated model to S3
-              s3 = boto3.client('s3')
-              s3.upload_file('/home/ec2-user/model-training/sentiment_model.pkl', 'real-time-chat-storage-${AWS::AccountId}', 'models/sentiment_model.pkl')
-          EOF
-          chmod +x /home/ec2-user/model-training/retrain_model.py
-          echo "0 0 * * * /home/ec2-user/model-training/retrain_model.py >> /home/ec2-user/model-training/retrain.log 2>&1" | crontab -
-
-  EC2InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref EC2S3AccessRole
-
-  ModelTrainingSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for model training EC2 instance
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 0.0.0.0/0  # Restrict to your IP in a real environment
-
-  # Lambda Functions
-  ConnectionManagerFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: ConnectionManager
-      Runtime: python3.12
-      Handler: connection_manager.lambda_handler
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Code:
-        ZipFile: |
-          import json
-          import boto3
-          import time
-          import os
-          import logging
-
-          # Configure logging
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
-
-          # Initialize DynamoDB client
-          dynamodb = boto3.resource('dynamodb')
-          connections_table = dynamodb.Table(os.environ.get('CONNECTIONS_TABLE_NAME', 'ConnectionsTable'))
-
-          def lambda_handler(event, context):
-              try:
-                  connection_id = event['requestContext']['connectionId']
-                  event_type = event['requestContext']['eventType']
-                  
-                  logger.info(f"Received {event_type} event for connection ID: {connection_id}")
-                  
-                  if event_type == 'CONNECT':
-                      # Store the connection in DynamoDB
-                      response = connections_table.put_item(
-                          Item={
-                              'connectionId': connection_id,
-                              'connectedAt': int(time.time()),
-                              'status': 'CONNECTED'
-                          }
-                      )
-                      logger.info(f"Successfully stored connection {connection_id}")
-                      
-                  elif event_type == 'DISCONNECT':
-                      # Remove the connection from DynamoDB
-                      response = connections_table.delete_item(
-                          Key={
-                              'connectionId': connection_id
-                          }
-                      )
-                      logger.info(f"Successfully removed connection {connection_id}")
-                  
-                  return {
-                      'statusCode': 200,
-                      'body': json.dumps({'message': f"Successful {event_type}"})
-                  }
-                  
-              except Exception as e:
-                  logger.error(f"Error processing {event.get('requestContext', {}).get('eventType', 'unknown')} event: {str(e)}")
-                  return {
-                      'statusCode': 500,
-                      'body': json.dumps({'message': f"Error: {str(e)}"})
-                  }
-      Environment:
-        Variables:
-          CONNECTIONS_TABLE_NAME: !Ref ConnectionsTable
-      Timeout: 30
-      MemorySize: 128
-
-  MessageProcessorFunction:
-    Type: AWS::Lambda::Function
-    DependsOn:
-      - ConnectionsTable
-      - MessagesTable
-    Properties:
-      FunctionName: MessageProcessor
-      Runtime: nodejs20.x
-      Handler: message_processor.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Code:
-        ZipFile: |
-          const AWS = require('aws-sdk');
-
-          // Initialize AWS services
-          const dynamoDB = new AWS.DynamoDB.DocumentClient();
-          let apiGateway;
-
-          // Define positive and negative word lists for basic sentiment analysis
-          const POSITIVE = ['happy', 'great', 'excellent', 'good', 'love', 'awesome', 'fantastic', 'wonderful', 'nice', 'amazing'];
-          const NEGATIVE = ['sad', 'bad', 'awful', 'terrible', 'horrible', 'hate', 'dislike', 'angry', 'upset', 'disappointed'];
-
-          // Generate a simple unique ID (in production, use a proper UUID library)
-          function generateUniqueId() {
-            return 'xxxxxxx'.replace(/[x]/g, () => Math.floor(Math.random() * 16).toString(16));
-          }
-
-          exports.handler = async (event) => {
-              console.log('Event received:', JSON.stringify(event));
-              
-              // Initialize API Gateway with the correct endpoint from the event
-              const domain = event.requestContext.domainName;
-              const stage = event.requestContext.stage;
-              apiGateway = new AWS.ApiGatewayManagementApi({
-                  endpoint: `${domain}/${stage}`
-              });
-              
-              try {
-                  // Extract connection ID and message data
-                  const connectionId = event.requestContext.connectionId;
-                  const body = JSON.parse(event.body);
-                  
-                  // Ensure body has expected format
-                  if (!body.action || !body.data) {
-                      return { statusCode: 400, body: JSON.stringify({ message: 'Invalid message format' }) };
-                  }
-
-                  // Only process 'sendmessage' action
-                  if (body.action !== 'sendmessage') {
-                      return { statusCode: 200, body: JSON.stringify({ message: 'Unsupported action' }) };
-                  }
-
-                  const text = body.data;
-                  
-                  // Perform simple sentiment analysis
-                  let score = 0;
-                  const words = text.toLowerCase().split(/\s+/);
-                  
-                  words.forEach(word => {
-                      if (POSITIVE.includes(word)) score += 1;
-                      if (NEGATIVE.includes(word)) score -= 1;
-                  });
-                  
-                  // Create message object
-                  const message = {
-                      messageId: generateUniqueId(),
-                      connectionId: connectionId,
-                      content: text,
-                      sentiment: score,
-                      timestamp: Date.now(),
-                      userId: body.userId || connectionId // Use provided userId or connectionId as fallback
-                  };
-                  
-                  // Store message in DynamoDB
-                  await dynamoDB.put({
-                      TableName: process.env.MESSAGES_TABLE_NAME || 'MessagesTable',
-                      Item: message
-                  }).promise();
-                  
-                  console.log('Message stored in DynamoDB:', message.messageId);
-                  
-                  // Fetch all active connections
-                  const connectionsData = await dynamoDB.scan({
-                      TableName: process.env.CONNECTIONS_TABLE_NAME || 'ConnectionsTable'
-                  }).promise();
-                  
-                  // Broadcast message to all connections
-                  const postCalls = connectionsData.Items.map(async ({ connectionId }) => {
-                      try {
-                          await apiGateway.postToConnection({
-                              ConnectionId: connectionId,
-                              Data: JSON.stringify({
-                                  type: 'message',
-                                  data: message
-                              })
-                          }).promise();
-                          console.log(`Message successfully sent to ${connectionId}`);
-                      } catch (err) {
-                          // Handle stale connections
-                          if (err.statusCode === 410) {
-                              console.log(`Connection ${connectionId} is stale, removing...`);
-                              await dynamoDB.delete({
-                                  TableName: process.env.CONNECTIONS_TABLE_NAME || 'ConnectionsTable',
-                                  Key: { connectionId }
-                              }).promise();
-                          } else {
-                              console.error(`Error sending message to ${connectionId}:`, err);
-                              throw err;
-                          }
-                      }
-                  });
-                  
-                  // Wait for all broadcast operations to complete
-                  await Promise.all(postCalls);
-                  
-                  return { 
-                      statusCode: 200, 
-                      body: JSON.stringify({ 
-                          message: 'Message processed and broadcast successfully',
-                          messageId: message.messageId
-                      }) 
-                  };
-                  
-              } catch (err) {
-                  console.error('Error processing message:', err);
-                  return { 
-                      statusCode: 500, 
-                      body: JSON.stringify({ 
-                          message: 'Error processing message',
-                          error: err.message
-                      }) 
-                  };
-              }
-          };
-      Environment:
-        Variables:
-          CONNECTIONS_TABLE_NAME: !Ref ConnectionsTable
-          MESSAGES_TABLE_NAME: !Ref MessagesTable
-      Timeout: 30
-      MemorySize: 256
-
-  # WebSocket API and Routes
+  # ========================================================================
+  # API Gateway WebSocket API
+  # ========================================================================
   WebSocketAPI:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: RealTimeChatWebSocketAPI
+      Name: !Sub '${EnvironmentName}-chat-websocket-api'
       ProtocolType: WEBSOCKET
       RouteSelectionExpression: "$request.body.action"
 
-  # Connect Route
+  # WebSocket API Routes
   ConnectRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref WebSocketAPI
-      RouteKey: "$connect"
+      RouteKey: $connect
       AuthorizationType: NONE
       OperationName: ConnectRoute
-      Target: !Join
+      Target: !Join 
         - /
         - - integrations
           - !Ref ConnectIntegration
 
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketAPI
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Join 
+        - /
+        - - integrations
+          - !Ref DisconnectIntegration
+
+  SendMessageRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketAPI
+      RouteKey: sendMessage
+      AuthorizationType: NONE
+      OperationName: SendMessageRoute
+      Target: !Join 
+        - /
+        - - integrations
+          - !Ref SendMessageIntegration
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketAPI
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target: !Join 
+        - /
+        - - integrations
+          - !Ref DefaultIntegration
+
+  # WebSocket API Integrations
   ConnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
       ApiId: !Ref WebSocketAPI
       Description: Connect Integration
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectionManagerFunction.Arn}/invocations
-
-  # Disconnect Route
-  DisconnectRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref WebSocketAPI
-      RouteKey: "$disconnect"
-      AuthorizationType: NONE
-      OperationName: DisconnectRoute
-      Target: !Join
-        - /
-        - - integrations
-          - !Ref DisconnectIntegration
+      IntegrationUri: 
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectionManagerFunction.Arn}/invocations
 
   DisconnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -402,20 +135,9 @@ Resources:
       ApiId: !Ref WebSocketAPI
       Description: Disconnect Integration
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectionManagerFunction.Arn}/invocations
-
-  # Send Message Route
-  SendMessageRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref WebSocketAPI
-      RouteKey: "sendmessage"
-      AuthorizationType: NONE
-      OperationName: SendMessageRoute
-      Target: !Join
-        - /
-        - - integrations
-          - !Ref SendMessageIntegration
+      IntegrationUri: 
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectionManagerFunction.Arn}/invocations
 
   SendMessageIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -423,10 +145,22 @@ Resources:
       ApiId: !Ref WebSocketAPI
       Description: Send Message Integration
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MessageProcessorFunction.Arn}/invocations
+      IntegrationUri: 
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MessageProcessorFunction.Arn}/invocations
 
-  # Stage
-  WebSocketAPIStage:
+  DefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketAPI
+      Description: Default Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DefaultHandlerFunction.Arn}/invocations
+
+  # WebSocket API Stage
+  WebSocketStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
       ApiId: !Ref WebSocketAPI
@@ -434,42 +168,568 @@ Resources:
       Description: Production Stage
       AutoDeploy: true
 
-  # Lambda Permissions
-  ConnectionManagerPermission:
+  # ========================================================================
+  # Lambda Functions (using existing LabRole)
+  # ========================================================================
+  ConnectionManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-chat-connection-manager'
+      Handler: connection_manager.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/LabRole'
+      Runtime: python3.9
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: lambda/connection_manager.zip
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          WEBSOCKET_ENDPOINT: !Sub "${WebSocketAPI}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  MessageProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-chat-message-processor'
+      Handler: message_processor.handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/LabRole'
+      Runtime: nodejs16.x
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: lambda/message_processor.zip
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          MESSAGES_TABLE: !Ref MessagesTable
+          WEBSOCKET_ENDPOINT: !Sub "${WebSocketAPI}.execute-api.${AWS::Region}.amazonaws.com/prod"
+          EVENT_BUS_NAME: !Ref ChatEventBus
+
+  DefaultHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-chat-default-handler'
+      Handler: default_handler.handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/LabRole'
+      Runtime: nodejs16.x
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: lambda/default_handler.zip
+      Environment:
+        Variables:
+          WEBSOCKET_ENDPOINT: !Sub "${WebSocketAPI}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  BroadcastFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-chat-broadcast'
+      Handler: message_broadcast.handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/LabRole'
+      Runtime: nodejs16.x
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: lambda/message_broadcast.zip
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          WEBSOCKET_ENDPOINT: !Sub "${WebSocketAPI}.execute-api.${AWS::Region}.amazonaws.com/prod"
+          EVENT_BUS_NAME: !Ref ChatEventBus
+
+  # Lambda Permissions for API Gateway
+  ConnectPermission:
     Type: AWS::Lambda::Permission
-    DependsOn:
-      - WebSocketAPI
-      - ConnectionManagerFunction
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref ConnectionManagerFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*/*"
 
-  MessageProcessorPermission:
+  DisconnectPermission:
     Type: AWS::Lambda::Permission
-    DependsOn:
-      - WebSocketAPI
-      - MessageProcessorFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ConnectionManagerFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*/*"
+
+  SendMessagePermission:
+    Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref MessageProcessorFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*/*"
+
+  DefaultPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DefaultHandlerFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketAPI}/*/*"
+
+  # ========================================================================
+  # EC2 Instance for Model Training
+  # ========================================================================
+  ModelTrainingSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for sentiment model training EC2 instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH access from anywhere (for demo purposes only)
+
+  ModelTrainingInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      SecurityGroups:
+        - !Ref ModelTrainingSecurityGroup
+      ImageId: ami-0c02fb55956c7d316  # Amazon Linux 2 AMI (HVM) in us-west-2 region
+      IamInstanceProfile: LabInstanceProfile  # Use LabRole via instance profile
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-sentiment-model-training
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update and install dependencies
+          yum update -y
+          yum install -y python3 python3-pip git
+
+          # Create a directory for the model training code
+          mkdir -p /home/ec2-user/sentiment-training
+
+          # Create training script
+          cat > /home/ec2-user/sentiment-training/train_model.py << 'EOL'
+          import boto3
+          import json
+          import datetime
+          import os
+          
+          def train_sentiment_model():
+              """
+              Train sentiment analysis model and upload to S3
+              This is a simplified training function for demonstration purposes
+              """
+              print("Starting sentiment model training...")
+              
+              # In a real scenario, we would:
+              # 1. Load data from DynamoDB or S3
+              # 2. Preprocess data
+              # 3. Train a sentiment analysis model (NLTK, spaCy, etc.)
+              # 4. Save the model
+
+              # For this demo, we'll create a simple word-based sentiment analyzer
+              model = {
+                  "positive_words": [
+                      "happy", "good", "great", "excellent", "wonderful", "awesome",
+                      "fantastic", "nice", "amazing", "love", "best", "beautiful",
+                      "perfect", "brilliant", "outstanding", "fabulous", "superb"
+                  ],
+                  "negative_words": [
+                      "sad", "bad", "terrible", "awful", "horrible", "disappointing",
+                      "poor", "worst", "hate", "dislike", "annoying", "frustrating",
+                      "unpleasant", "painful", "disgusting", "dreadful", "miserable"
+                  ],
+                  "training_timestamp": datetime.datetime.now().isoformat(),
+                  "version": "1.0.0"
+              }
+              
+              # Save the model locally
+              with open('sentiment_model.json', 'w') as f:
+                  json.dump(model, f, indent=2)
+              
+              # Upload to S3
+              s3_bucket = os.environ.get('S3_BUCKET_NAME')
+              if not s3_bucket:
+                  print("Error: S3_BUCKET_NAME environment variable not set")
+                  return False
+              
+              try:
+                  s3 = boto3.client('s3')
+                  s3.upload_file(
+                      'sentiment_model.json',
+                      s3_bucket,
+                      'models/sentiment_model.json'
+                  )
+                  print(f"Successfully uploaded model to s3://{s3_bucket}/models/sentiment_model.json")
+                  
+                  # Publish event to EventBridge
+                  eventbridge = boto3.client('events')
+                  eventbridge.put_events(
+                      Entries=[
+                          {
+                              'Source': 'chat.application',
+                              'DetailType': 'ModelTrainingCompleted',
+                              'Detail': json.dumps({
+                                  'timestamp': datetime.datetime.now().isoformat(),
+                                  'modelVersion': '1.0.0',
+                                  's3Location': f"s3://{s3_bucket}/models/sentiment_model.json"
+                              }),
+                              'EventBusName': '${ChatEventBus}'
+                          }
+                      ]
+                  )
+                  print("Published ModelTrainingCompleted event to EventBridge")
+                  
+                  return True
+              except Exception as e:
+                  print(f"Error: {e}")
+                  return False
+          
+          if __name__ == "__main__":
+              train_sentiment_model()
+          EOL
+
+          # Create cron job script to run training daily
+          cat > /home/ec2-user/sentiment-training/run_training.sh << 'EOL'
+          #!/bin/bash
+          cd /home/ec2-user/sentiment-training
+          export S3_BUCKET_NAME="${S3BucketName}"
+          python3 train_model.py >> training.log 2>&1
+          EOL
+
+          # Make script executable
+          chmod +x /home/ec2-user/sentiment-training/run_training.sh
+
+          # Set up cron job to run training daily at midnight
+          echo "0 0 * * * /home/ec2-user/sentiment-training/run_training.sh" > /tmp/crontab
+          crontab -u ec2-user /tmp/crontab
+
+          # Install AWS SDK for Python (boto3)
+          pip3 install boto3
+
+          # Run training once during setup
+          sudo -u ec2-user bash -c "cd /home/ec2-user/sentiment-training && S3_BUCKET_NAME=${S3BucketName} python3 train_model.py > initial_training.log 2>&1"
+
+  # ========================================================================
+  # EventBridge
+  # ========================================================================
+  ChatEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${EnvironmentName}-chat-events
+
+  MessageCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${EnvironmentName}-message-created
+      Description: 'Rule that triggers when a new message is created'
+      EventBusName: !Ref ChatEventBus
+      EventPattern:
+        source:
+          - 'chat.application'
+        detail-type:
+          - 'MessageCreated'
+      State: ENABLED
+      Targets:
+        - Id: 'BroadcastTarget'
+          Arn: !GetAtt BroadcastFunction.Arn
+
+  SentimentAnalysisCompletedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${EnvironmentName}-sentiment-analysis-completed
+      Description: 'Rule that triggers when sentiment analysis is completed'
+      EventBusName: !Ref ChatEventBus
+      EventPattern:
+        source:
+          - 'chat.application'
+        detail-type:
+          - 'SentimentAnalysisCompleted'
+      State: ENABLED
+      Targets:
+        - Id: 'MessageProcessorTarget'
+          Arn: !GetAtt MessageProcessorFunction.Arn
+
+  ModelTrainingCompletedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${EnvironmentName}-model-training-completed
+      Description: 'Rule that triggers when model training is completed'
+      EventBusName: !Ref ChatEventBus
+      EventPattern:
+        source:
+          - 'chat.application'
+        detail-type:
+          - 'ModelTrainingCompleted'
+      State: ENABLED
+      Targets:
+        - Id: 'MessageProcessorTarget'
+          Arn: !GetAtt MessageProcessorFunction.Arn
+
+  # EventBridge Permissions
+  EventBridgeMessageProcessorPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MessageProcessorFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SentimentAnalysisCompletedRule.Arn
+
+  EventBridgeModelTrainingPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MessageProcessorFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ModelTrainingCompletedRule.Arn
+
+  EventBridgeBroadcastPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BroadcastFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MessageCreatedRule.Arn
+
+  # ========================================================================
+  # CloudWatch Monitoring
+  # ========================================================================
+  # SNS Topic for Alerts
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub "${EnvironmentName} Chat Application Alerts"
+      TopicName: !Sub "${EnvironmentName}-chat-alerts"
+
+  # SNS Subscription
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AdminEmail
+
+  # CloudWatch Dashboard
+  ApplicationDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${EnvironmentName}-chat-dashboard"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${MessageProcessorFunction}" ],
+                  [ ".", "Errors", ".", "." ],
+                  [ ".", "Duration", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Message Processor Lambda Metrics",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${ConnectionManagerFunction}" ],
+                  [ ".", "Errors", ".", "." ],
+                  [ ".", "Duration", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Connection Manager Lambda Metrics",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${ConnectionsTable}" ],
+                  [ ".", "ConsumedWriteCapacityUnits", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Connections Table Metrics",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${MessagesTable}" ],
+                  [ ".", "ConsumedWriteCapacityUnits", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Messages Table Metrics",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/EC2", "CPUUtilization", "InstanceId", "${ModelTrainingInstance}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "EC2 Model Training CPU Utilization",
+                "period": 300
+              }
+            }
+          ]
+        }
+
+  # CloudWatch Alarms
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EnvironmentName}-lambda-errors"
+      AlarmDescription: Alarm when Lambda functions have errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref MessageProcessorFunction
+      AlarmActions:
+        - !Ref AlertTopic
+
+  DynamoDBThrottlingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EnvironmentName}-dynamodb-throttling"
+      AlarmDescription: Alarm when DynamoDB tables experience throttling
+      MetricName: ThrottledRequests
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: TableName
+          Value: !Ref MessagesTable
+      AlarmActions:
+        - !Ref AlertTopic
+
+  EC2CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EnvironmentName}-ec2-cpu"
+      AlarmDescription: Alarm when EC2 instance CPU exceeds 80%
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref ModelTrainingInstance
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # CloudWatch Log Groups
+  MessageProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${MessageProcessorFunction}"
+      RetentionInDays: 14
+  
+  ConnectionManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ConnectionManagerFunction}"
+      RetentionInDays: 14
+  
+  BroadcastFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${BroadcastFunction}"
+      RetentionInDays: 14
+  
+  DefaultHandlerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${DefaultHandlerFunction}"
+      RetentionInDays: 14
 
 Outputs:
-  EC2InstanceId:
-    Description: ID of the model training EC2 instance
-    Value: !Ref ModelTrainingInstance
-
-  S3BucketName:
-    Description: Name of the S3 bucket for chat storage
-    Value: !Ref ChatStorageBucket
-
-  WebSocketAPIId:
-    Description: ID of the WebSocket API
-    Value: !Ref WebSocketAPI
-
   WebSocketURL:
-    Description: URL of the WebSocket API
-    Value: !Sub 'wss://${WebSocketAPI}.execute-api.${AWS::Region}.amazonaws.com/prod' 
+    Description: WebSocket URL for client connections
+    Value: !Sub "wss://${WebSocketAPI}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    
+  FrontendURL:
+    Description: URL for the frontend website
+    Value: !Sub "http://${S3BucketName}.s3-website-${AWS::Region}.amazonaws.com/index.html"
+    
+  ConnectionsTableName:
+    Description: DynamoDB table for WebSocket connections
+    Value: !Ref ConnectionsTable
+    
+  MessagesTableName:
+    Description: DynamoDB table for chat messages
+    Value: !Ref MessagesTable
+    
+  S3ConsoleURL:
+    Description: URL to access the S3 bucket in AWS console
+    Value: !Sub "https://s3.console.aws.amazon.com/s3/buckets/${S3BucketName}?region=${AWS::Region}"
+  
+  ModelTrainingInstanceId:
+    Description: EC2 Instance ID for the model training server
+    Value: !Ref ModelTrainingInstance
+  
+  ModelTrainingPublicDNS:
+    Description: Public DNS of the model training EC2 instance
+    Value: !GetAtt ModelTrainingInstance.PublicDnsName
+  
+  ChatEventBusName:
+    Description: Name of the EventBridge event bus
+    Value: !Ref ChatEventBus
+  
+  DashboardURL:
+    Description: URL to the CloudWatch Dashboard
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${EnvironmentName}-chat-dashboard"
+  
+  AlertTopicARN:
+    Description: ARN of the SNS Topic for alerts
+    Value: !Ref AlertTopic 

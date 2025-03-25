@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for EC2 instance used for sentiment model training'
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name for resource naming (e.g., Dev, Test, Prod)
+    Type: String
+    Default: Prod
+  
+  S3BucketName:
+    Description: Name of the S3 bucket for storing training data and model artifacts
+    Type: String
+  
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t3.micro
+
+Resources:
+  # EC2 Security Group
+  ModelTrainingSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for sentiment model training EC2 instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH access from anywhere (for demo purposes only)
+
+  # EC2 Instance for Model Training
+  ModelTrainingInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - !Ref ModelTrainingSecurityGroup
+      ImageId: ami-0fc2eeaed4f7b95c5  # Updated Amazon Linux 2 AMI (HVM) in us-west-2 region
+      IamInstanceProfile: LabInstanceProfile  # Use LabRole via instance profile
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-sentiment-model-training
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update and install dependencies
+          yum update -y
+          yum install -y python3 python3-pip git
+
+          # Create a directory for the model training code
+          mkdir -p /home/ec2-user/sentiment-training
+
+          # Create training script
+          cat > /home/ec2-user/sentiment-training/train_model.py << 'EOL'
+          import boto3
+          import json
+          import datetime
+          import os
+          
+          def train_sentiment_model():
+              """
+              Train sentiment analysis model and upload to S3
+              This is a simplified training function for demonstration purposes
+              """
+              print("Starting sentiment model training...")
+              
+              # In a real scenario, we would:
+              # 1. Load data from DynamoDB or S3
+              # 2. Preprocess data
+              # 3. Train a sentiment analysis model (NLTK, spaCy, etc.)
+              # 4. Save the model
+
+              # For this demo, we'll create a simple word-based sentiment analyzer
+              model = {
+                  "positive_words": [
+                      "happy", "good", "great", "excellent", "wonderful", "awesome",
+                      "fantastic", "nice", "amazing", "love", "best", "beautiful",
+                      "perfect", "brilliant", "outstanding", "fabulous", "superb"
+                  ],
+                  "negative_words": [
+                      "sad", "bad", "terrible", "awful", "horrible", "disappointing",
+                      "poor", "worst", "hate", "dislike", "annoying", "frustrating",
+                      "unpleasant", "painful", "disgusting", "dreadful", "miserable"
+                  ],
+                  "training_timestamp": datetime.datetime.now().isoformat(),
+                  "version": "1.0.0"
+              }
+              
+              # Save the model locally
+              with open('sentiment_model.json', 'w') as f:
+                  json.dump(model, f, indent=2)
+              
+              # Upload to S3
+              s3_bucket = os.environ.get('S3_BUCKET_NAME')
+              if not s3_bucket:
+                  print("Error: S3_BUCKET_NAME environment variable not set")
+                  return False
+              
+              try:
+                  s3 = boto3.client('s3')
+                  s3.upload_file(
+                      'sentiment_model.json',
+                      s3_bucket,
+                      'models/sentiment_model.json'
+                  )
+                  print(f"Successfully uploaded model to s3://{s3_bucket}/models/sentiment_model.json")
+                  return True
+              except Exception as e:
+                  print(f"Error uploading model to S3: {e}")
+                  return False
+          
+          if __name__ == "__main__":
+              train_sentiment_model()
+          EOL
+
+          # Create cron job script to run training daily
+          cat > /home/ec2-user/sentiment-training/run_training.sh << 'EOL'
+          #!/bin/bash
+          cd /home/ec2-user/sentiment-training
+          export S3_BUCKET_NAME="${S3BucketName}"
+          python3 train_model.py >> training.log 2>&1
+          EOL
+
+          # Make script executable
+          chmod +x /home/ec2-user/sentiment-training/run_training.sh
+
+          # Set up cron job to run training daily at midnight
+          echo "0 0 * * * /home/ec2-user/sentiment-training/run_training.sh" > /tmp/crontab
+          crontab -u ec2-user /tmp/crontab
+
+          # Install AWS SDK for Python (boto3)
+          pip3 install boto3
+
+          # Run training once during setup
+          sudo -u ec2-user bash -c "cd /home/ec2-user/sentiment-training && S3_BUCKET_NAME=${S3BucketName} python3 train_model.py > initial_training.log 2>&1"
+
+Outputs:
+  ModelTrainingInstanceId:
+    Description: EC2 Instance ID for the model training server
+    Value: !Ref ModelTrainingInstance
+  
+  ModelTrainingPublicDNS:
+    Description: Public DNS of the model training EC2 instance
+    Value: !GetAtt ModelTrainingInstance.PublicDnsName 
