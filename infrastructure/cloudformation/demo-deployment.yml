@@ -1,0 +1,582 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Real-Time Chat Application with Sentiment Analysis - Infrastructure as Code Demo'
+
+Parameters:
+  AppName:
+    Type: String
+    Default: "real-time-chat"
+    Description: Application name used to prefix resources
+  
+  DeploymentStage:
+    Type: String
+    Default: "demo"
+    Description: Deployment stage
+  
+  BucketNameSuffix:
+    Type: String
+    Description: Unique suffix for S3 bucket name
+    AllowedPattern: "[a-z0-9-]+"
+    MinLength: 3
+    MaxLength: 20
+    
+  # second Compute service settings
+  EC2InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: EC2 instance type for model training
+    AllowedValues:
+      - t2.micro
+      - t2.small
+
+Resources:
+  # ===== STORAGE CATEGORY =====
+  # S3 Bucket for storing artifacts (already present)
+  DeploymentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AppName}-${DeploymentStage}-${BucketNameSuffix}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ===== DATABASE CATEGORY =====
+  # DynamoDB Tables (already present)
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AppName}-${DeploymentStage}-connections"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AppName}-${DeploymentStage}-messages"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: messageId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: messageId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ===== NETWORKING CATEGORY =====
+  # API Gateway (already present)
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${AppName}-${DeploymentStage}-websocket-api"
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  # ===== COMPUTE CATEGORY 1 =====
+  # Lambda Functions (already present)
+  
+  # Lambda IAM Role (for permissions)
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub "${AppName}-${DeploymentStage}-lambda-policy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: 
+                  - !GetAtt ConnectionsTable.Arn
+                  - !GetAtt MessagesTable.Arn
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*"
+              - Effect: Allow
+                Action:
+                  - comprehend:DetectSentiment
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref NotificationTopic
+
+  # Lambda Functions
+  ConnectionManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AppName}-${DeploymentStage}-connection-manager"
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs18.x
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log('Connection event:', JSON.stringify(event));
+            
+            // Example implementation of connection handler
+            const connectionId = event.requestContext.connectionId;
+            
+            // Implementation would store the connection ID in DynamoDB
+            
+            return {
+              statusCode: 200,
+              body: 'Connected'
+            };
+          };
+
+  DisconnectManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AppName}-${DeploymentStage}-disconnect-manager"
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs18.x
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log('Disconnect event:', JSON.stringify(event));
+            
+            // Example implementation of disconnect handler
+            const connectionId = event.requestContext.connectionId;
+            
+            // Implementation would remove the connection ID from DynamoDB
+            
+            return {
+              statusCode: 200,
+              body: 'Disconnected'
+            };
+          };
+
+  MessageProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AppName}-${DeploymentStage}-message-processor"
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs18.x
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          MESSAGES_TABLE: !Ref MessagesTable
+          SNS_TOPIC_ARN: !Ref NotificationTopic
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const docClient = new AWS.DynamoDB.DocumentClient();
+          const sns = new AWS.SNS();
+          
+          exports.handler = async (event) => {
+            console.log('Message event:', JSON.stringify(event));
+            
+            // Example implementation of message processor
+            const connectionId = event.requestContext.connectionId;
+            const body = JSON.parse(event.body);
+            
+            // Implementation would:
+            // 1. Store the message in DynamoDB
+            // 2. Perform sentiment analysis using Amazon Comprehend
+            // 3. Broadcast the message to all connected clients
+            
+            // Example SNS notification for negative sentiment
+            if (body.message && body.message.toLowerCase().includes('urgent')) {
+              await sns.publish({
+                TopicArn: process.env.SNS_TOPIC_ARN,
+                Subject: 'Urgent Message Detected',
+                Message: `Urgent message detected: ${body.message}`
+              }).promise();
+            }
+            
+            return {
+              statusCode: 200,
+              body: 'Message processed'
+            };
+          };
+
+  # ===== COMPUTE CATEGORY 2 =====
+  # EC2 Instance for model training
+  ModelTrainingInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      ImageId: "ami-0c94855ba95c71c99" 
+      SecurityGroups:
+        - !Ref ModelTrainingSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AppName}-${DeploymentStage}-model-training"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install -y python3 python3-pip
+          pip3 install boto3 numpy pandas scikit-learn
+          mkdir -p /home/ec2-user/model-training
+          cat > /home/ec2-user/model-training/train_model.py << 'EOF'
+          import boto3
+          import json
+          import os
+          import pandas as pd
+          import numpy as np
+          from datetime import datetime
+          
+          # Simple script to simulate model training
+          print(f"Starting model training at {datetime.now().isoformat()}")
+          
+          # Connect to DynamoDB
+          dynamodb = boto3.resource('dynamodb')
+          messages_table = dynamodb.Table('${AppName}-${DeploymentStage}-messages')
+          
+          print("Training sentiment analysis model...")
+          # Simulate model training with a sleep
+          import time
+          time.sleep(10)
+          
+          print("Model training completed")
+          
+          # Store model metadata in S3
+          s3 = boto3.client('s3')
+          model_metadata = {
+              "version": datetime.now().isoformat(),
+              "accuracy": 0.92,
+              "training_time_seconds": 10
+          }
+          
+          s3.put_object(
+              Bucket="${AppName}-${DeploymentStage}-${BucketNameSuffix}",
+              Key="models/sentiment_model_metadata.json",
+              Body=json.dumps(model_metadata),
+              ContentType="application/json"
+          )
+          
+          print("Model metadata uploaded to S3")
+          EOF
+          
+          chmod +x /home/ec2-user/model-training/train_model.py
+
+  ModelTrainingSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for model training EC2 instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Restrict this in production
+
+  # ===== APPLICATION INTEGRATION CATEGORY =====
+  # SNS for notifications
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AppName}-${DeploymentStage}-notifications"
+      DisplayName: "Chat Notifications"
+
+  # ===== MANAGEMENT & GOVERNANCE CATEGORY =====
+  # CloudWatch Dashboard (already present)
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AppName}-${DeploymentStage}-dashboard"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", "ApiId", "${WebSocketApi}", "Stage", "${DeploymentStage}", { "stat": "SampleCount", "period": 300 }]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "WebSocket API Requests"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${ConnectionManagerFunction}", { "stat": "Sum", "period": 300 }],
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${DisconnectManagerFunction}", { "stat": "Sum", "period": 300 }],
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${MessageProcessorFunction}", { "stat": "Sum", "period": 300 }]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Invocations"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ConnectionManagerFunction}", { "stat": "Average", "period": 300 }],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${DisconnectManagerFunction}", { "stat": "Average", "period": 300 }],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${MessageProcessorFunction}", { "stat": "Average", "period": 300 }]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Duration"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Errors", "FunctionName", "${ConnectionManagerFunction}", { "stat": "Sum", "period": 300 }],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${DisconnectManagerFunction}", { "stat": "Sum", "period": 300 }],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${MessageProcessorFunction}", { "stat": "Sum", "period": 300 }]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/SNS", "NumberOfMessagesPublished", "TopicName", "${NotificationTopic}", { "stat": "Sum", "period": 300 }]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "SNS Messages Published"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/EC2", "CPUUtilization", "InstanceId", "${ModelTrainingInstance}", { "stat": "Average", "period": 300 }]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "EC2 CPU Utilization"
+              }
+            }
+          ]
+        }
+
+  # Add CloudWatch Alarm for monitoring
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AppName}-${DeploymentStage}-lambda-errors"
+      AlarmDescription: "Alarm when Lambda functions have errors"
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref MessageProcessorFunction
+      AlarmActions:
+        - !Ref NotificationTopic
+
+  # WebSocket API components
+  # WebSocket API Routes
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target: !Sub "integrations/${ConnectIntegration}"
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Sub "integrations/${DisconnectIntegration}"
+
+  SendMessageRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: sendMessage
+      AuthorizationType: NONE
+      OperationName: SendMessageRoute
+      Target: !Sub "integrations/${SendMessageIntegration}"
+
+  # WebSocket API Integrations
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectionManagerFunction.Arn}/invocations"
+
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DisconnectManagerFunction.Arn}/invocations"
+
+  SendMessageIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MessageProcessorFunction.Arn}/invocations"
+
+  # WebSocket API Deployment and Stage
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - SendMessageRoute
+    Properties:
+      ApiId: !Ref WebSocketApi
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      DeploymentId: !Ref Deployment
+      StageName: !Ref DeploymentStage
+      DefaultRouteSettings:
+        DataTraceEnabled: true
+        LoggingLevel: INFO
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+
+  # Lambda Permissions
+  ConnectionManagerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ConnectionManagerFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$connect"
+
+  DisconnectManagerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DisconnectManagerFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$disconnect"
+
+  MessageProcessorPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MessageProcessorFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/sendMessage"
+
+Outputs:
+  WebSocketURL:
+    Description: "WebSocket URL"
+    Value: !Sub "wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${DeploymentStage}"
+  
+  S3BucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref DeploymentBucket
+  
+  ConnectionsTableName:
+    Description: "DynamoDB Connections Table Name"
+    Value: !Ref ConnectionsTable
+  
+  MessagesTableName:
+    Description: "DynamoDB Messages Table Name"
+    Value: !Ref MessagesTable
+
+  EC2InstanceId:
+    Description: "EC2 Instance ID for Model Training"
+    Value: !Ref ModelTrainingInstance
+  
+  SNSTopicARN:
+    Description: "SNS Topic ARN for Notifications"
+    Value: !Ref NotificationTopic
+
+  DashboardURL:
+    Description: "CloudWatch Dashboard URL"
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AppName}-${DeploymentStage}-dashboard" 

@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Real-time Chat App - EC2 Model Training Instance'
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to store Lambda code and model artifacts
+  
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+    Description: EC2 instance type for the model training server
+
+Resources:
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for model training EC2 instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-ModelTraining-SG"
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Path: /
+      RoleName: !Sub "${AWS::StackName}-EC2ModelTrainingRole"
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2Role
+
+  ModelTrainingInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          # Update system packages
+          yum update -y
+          
+          # Install Python and required tools
+          yum install -y python3 python3-pip git
+          
+          # Install AWS CLI
+          pip3 install awscli --upgrade
+          
+          # Install model training dependencies
+          pip3 install torch transformers datasets scikit-learn pandas numpy
+          
+          # Create training directory
+          mkdir -p /home/ec2-user/model-training
+          
+          # Create script to download training data from S3
+          cat > /home/ec2-user/model-training/download_data.sh << 'EOF'
+          #!/bin/bash
+          aws s3 cp s3://${S3BucketName}/training-data/ /home/ec2-user/model-training/data/ --recursive
+          EOF
+          
+          # Create training script
+          cat > /home/ec2-user/model-training/train_model.py << 'EOF'
+          import os
+          import torch
+          from transformers import AutoModelForSequenceClassification, AutoTokenizer, Trainer, TrainingArguments
+          from datasets import load_dataset
+          
+          # Load dataset from local files
+          dataset = load_dataset('csv', data_files={'train': 'data/train.csv', 'validation': 'data/validation.csv'})
+          
+          # Load pre-trained model and tokenizer
+          model_name = "distilbert-base-uncased"
+          tokenizer = AutoTokenizer.from_pretrained(model_name)
+          model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+          
+          # Tokenize dataset
+          def tokenize_function(examples):
+              return tokenizer(examples["text"], padding="max_length", truncation=True)
+          
+          tokenized_datasets = dataset.map(tokenize_function, batched=True)
+          
+          # Setup training arguments
+          training_args = TrainingArguments(
+              output_dir="./results",
+              num_train_epochs=3,
+              per_device_train_batch_size=8,
+              per_device_eval_batch_size=8,
+              warmup_steps=500,
+              weight_decay=0.01,
+              logging_dir="./logs",
+          )
+          
+          # Create Trainer
+          trainer = Trainer(
+              model=model,
+              args=training_args,
+              train_dataset=tokenized_datasets["train"],
+              eval_dataset=tokenized_datasets["validation"]
+          )
+          
+          # Train model
+          trainer.train()
+          
+          # Save model
+          model.save_pretrained('./model')
+          tokenizer.save_pretrained('./model')
+          
+          # Upload model to S3
+          os.system(f"aws s3 cp ./model s3://${S3BucketName}/models/ --recursive")
+          EOF
+          
+          # Create upload script
+          cat > /home/ec2-user/model-training/upload_model.sh << 'EOF'
+          #!/bin/bash
+          aws s3 cp /home/ec2-user/model-training/model/ s3://${S3BucketName}/models/ --recursive
+          EOF
+          
+          # Set permissions
+          chmod +x /home/ec2-user/model-training/*.sh
+          chown -R ec2-user:ec2-user /home/ec2-user/model-training/
+          
+          # CloudWatch metrics setup
+          yum install -y amazon-cloudwatch-agent
+          
+          # Signal completion
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ModelTrainingInstance --region ${AWS::Region}
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-ModelTraining"
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-0c55b159cbfafe1f0
+    us-east-2:
+      AMI: ami-0fb653ca2d3203ac1
+    us-west-1:
+      AMI: ami-01311df3780ebd33e
+    us-west-2:
+      AMI: ami-0892d3c7ee96c0bf7
+    eu-west-1:
+      AMI: ami-0244a5621d426859b
+    eu-central-1:
+      AMI: ami-0cfbf4f6db41068ac
+    ap-northeast-1:
+      AMI: ami-0cd744adeca97abb1
+    ap-northeast-2:
+      AMI: ami-0e1d09d8b7c512205
+    ap-southeast-1:
+      AMI: ami-00b8d9cb8a7161e41
+    ap-southeast-2:
+      AMI: ami-075a72b1992cb0687
+
+Outputs:
+  EC2InstanceId:
+    Description: ID of the EC2 instance
+    Value: !Ref ModelTrainingInstance
+  
+  EC2PublicDNS:
+    Description: Public DNS name of the EC2 instance
+    Value: !GetAtt ModelTrainingInstance.PublicDnsName 

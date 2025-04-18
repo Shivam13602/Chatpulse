@@ -1,7 +1,6 @@
 import json
 import boto3
 import os
-import time
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
@@ -9,8 +8,8 @@ connections_table = dynamodb.Table(os.environ.get('CONNECTIONS_TABLE', 'Connecti
 
 def lambda_handler(event, context):
     """
-    Lambda function to handle WebSocket connection events.
-    Manages connections by storing connection IDs in DynamoDB.
+    Lambda function to handle WebSocket disconnection events.
+    Removes connection IDs from DynamoDB when clients disconnect.
     
     Parameters:
     - event: The event data from API Gateway
@@ -24,23 +23,21 @@ def lambda_handler(event, context):
     # Determine the route key (connect, disconnect, etc.)
     route_key = event['requestContext'].get('routeKey')
     
-    # Handle connection
-    if route_key == '$connect':
-        # Store connection ID in DynamoDB
+    # Handle disconnection
+    if route_key == '$disconnect':
         try:
-            connections_table.put_item(
-                Item={
-                    'connectionId': connection_id,
-                    'timestamp': int(time.time() * 1000),
-                    'status': 'connected'
+            # Remove connection ID from DynamoDB
+            connections_table.delete_item(
+                Key={
+                    'connectionId': connection_id
                 }
             )
-            print(f"Connection {connection_id} added to DynamoDB.")
+            print(f"Connection {connection_id} removed from DynamoDB.")
         except Exception as e:
-            print(f"Error storing connection {connection_id}: {str(e)}")
-            return {'statusCode': 500, 'body': 'Failed to connect'}
+            print(f"Error removing connection {connection_id}: {str(e)}")
+            return {'statusCode': 500, 'body': 'Failed to disconnect properly'}
     
     return {
         'statusCode': 200,
-        'body': 'Connected to WebSocket API'
+        'body': 'Disconnected from WebSocket API'
     } 

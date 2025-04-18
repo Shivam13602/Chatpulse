@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DynamoDB tables for Real-Time Chat Application with Sentiment Insights'
+
+Resources:
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ConnectionsTable
+      AttributeDefinitions:
+        - AttributeName: "connectionId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "connectionId"
+          KeyType: "HASH"
+      BillingMode: PAY_PER_REQUEST
+
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MessagesTable
+      AttributeDefinitions:
+        - AttributeName: "messageId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "messageId"
+          KeyType: "HASH"
+      BillingMode: PAY_PER_REQUEST
+
+Outputs:
+  ConnectionsTableName:
+    Description: Name of the DynamoDB table storing WebSocket connections
+    Value: !Ref ConnectionsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ConnectionsTableName"
+
+  MessagesTableName:
+    Description: Name of the DynamoDB table storing chat messages
+    Value: !Ref MessagesTable
+    Export:
+      Name: !Sub "${AWS::StackName}-MessagesTableName" 

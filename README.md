@@ -1,6 +1,6 @@
-# Real-Time Chat Application with Sentiment Insights
+# Chatpulse - Real-Time Chat Application with Sentiment Analysis
 
-This is a serverless, real-time chat application with sentiment analysis capabilities, built using various AWS services.
+A serverless real-time chat application with sentiment analysis capabilities, built using various AWS services. This application allows users to chat in real-time while analyzing the sentiment of messages.
 
 ## Architecture Overview
 
@@ -28,152 +28,72 @@ This application uses the following AWS services:
 ## Components
 
 ### Frontend
-- A simple HTML/JS single-page application hosted on Amazon S3
+- A simple HTML/JS/CSS single-page application hosted on Amazon S3
 - Connects to the WebSocket API to send and receive messages in real-time
 - Displays sentiment scores alongside messages
+- Features a responsive design suitable for desktop and mobile devices
 
 ### Backend
 - **Connection Manager Lambda (Python)**: Handles WebSocket connections/disconnections and stores connection IDs
-- **Message Processor Lambda (Node.js)**: Processes incoming messages, performs sentiment analysis, and stores in DynamoDB
-- **Broadcast Lambda (Node.js)**: Broadcasts messages to all connected clients
-- **Default Handler Lambda (Node.js)**: Handles default/fallback WebSocket routes
-- **EC2 Sentiment Model Training**: Trains and updates the sentiment analysis model
+- **Message Processor Lambda (Python)**: Processes incoming messages, performs sentiment analysis, and stores in DynamoDB
+- **Broadcast Lambda**: Broadcasts messages to all connected clients
 
 ### Data Storage
 - **DynamoDB Connections Table**: Stores WebSocket connection IDs
 - **DynamoDB Messages Table**: Stores chat messages with sentiment scores
 
-### Event-Driven Architecture
-- **EventBridge Event Bus**: Routes events between components
-- **Event Types**:
-  - MessageCreated: When a new message is sent
-  - SentimentAnalysisCompleted: When sentiment analysis is completed
-  - ModelTrainingCompleted: When the model is retrained
+## Features
 
-### Monitoring and Alerting
-- **CloudWatch Dashboard**: Displays metrics for Lambda functions, DynamoDB tables, and EC2 instance
-- **CloudWatch Alarms**: Alerts on Lambda errors, DynamoDB throttling, and EC2 CPU usage
-- **CloudWatch Logs**: Stores logs from all Lambda functions
+- **User authentication**: Login with a username and custom color
+- **Real-time messaging**: Instant updates via WebSocket
+- **Message sentiment analysis**: Automatic analysis of message sentiment
+- **Responsive design**: Works on desktop and mobile devices
+- **Dark mode**: Toggle between light and dark themes
+- **Emoji support**: Insert emojis in messages
+- **Typing indicators**: Shows when users are typing
+- **Connection status**: Visual indication of connection status
 
 ## Deployment
 
 ### Prerequisites
 - AWS CLI installed and configured
 - An AWS account with appropriate permissions
-- Node.js and npm installed (for Lambda packaging)
+- Python 3.6+ (for local development and Lambda functions)
 
-### Deployment Steps (Windows)
+### Deployment Steps
 
 1. Clone this repository
-2. Open PowerShell
-3. Navigate to the project directory
-4. Run the deployment script:
+2. Deploy the CloudFormation stack:
 
 ```powershell
-.\deploy.ps1 -Region us-west-2 -S3BucketName your-bucket-name -StackName your-stack-name -Environment Prod -AdminEmail your-email@example.com
+.\deploy.ps1 -Region us-west-2 -S3BucketName your-bucket-name -StackName ChatpulseApp
 ```
 
-### Deployment Steps (Linux/macOS)
+3. After deployment, access the application through the S3 website URL provided in the CloudFormation outputs.
 
-1. Clone this repository
-2. Open Terminal
-3. Navigate to the project directory
-4. Make the deployment script executable:
+## Local Development
 
-```bash
-chmod +x deploy.sh
-```
+To run the frontend locally:
 
-5. Run the deployment script:
-
-```bash
-./deploy.sh us-west-2 your-bucket-name your-stack-name Prod your-email@example.com
-```
-
-### Parameters
-
-- **Region**: AWS region to deploy to (default: us-west-2)
-- **S3BucketName**: Name for the S3 bucket to create (must be globally unique)
-- **StackName**: Name for the CloudFormation stack (default: real-time-chat-app)
-- **Environment**: Environment name (default: Prod)
-- **AdminEmail**: Email address for CloudWatch alarms
-
-## Usage
-
-After deployment, you'll receive:
-- WebSocket URL for client connections
-- Frontend URL to access the chat application
-- CloudWatch Dashboard URL for monitoring
-- EC2 Instance ID for the model training server
-
-1. Open the Frontend URL in a web browser
-2. Enter a username
-3. Start chatting with others who are connected
-4. Notice the sentiment scores next to each message
-
-## Architecture Diagram
+1. Navigate to the `src/frontend` directory
+2. Start the Python development server:
 
 ```
-┌────────────────┐       ┌─────────────────┐
-│                │       │                 │
-│  Web Browser   │◄─────►│  Amazon S3      │
-│  (Frontend)    │       │  (Static Site)  │
-│                │       │                 │
-└───────┬────────┘       └─────────────────┘
-        │
-        │ WebSocket
-        │
-┌───────▼────────┐
-│                │
-│  API Gateway   │
-│  (WebSocket)   │
-│                │
-└┬──────┬──────┬─┘
- │      │      │
- │      │      │
-┌▼──────▼──────▼─┐       ┌─────────────────┐
-│                │       │                 │
-│  AWS Lambda    │◄─────►│  EventBridge    │
-│  Functions     │       │  Event Bus      │
-│                │       │                 │
-└┬───────────────┘       └────┬────────────┘
- │                            │
- │                            │
-┌▼─────────────────┐          │
-│                  │          │
-│  DynamoDB        │          │
-│  Tables          │          │
-│                  │          │
-└──────────────────┘          │
-                              │
-┌─────────────────────┐       │
-│                     │◄──────┘
-│  EC2                │
-│  (Model Training)   │
-│                     │
-└─────────────────────┘
+cd src/frontend
+python serve.py
 ```
 
-## Monitoring and Maintenance
-
-- **CloudWatch Dashboard**: Access it using the URL from the deployment outputs
-- **Logs**: Available in CloudWatch Logs under the `/aws/lambda/` log groups
-- **Alarms**: Configured to send emails when thresholds are exceeded
+3. Open your web browser and navigate to `http://localhost:8080`
 
 ## Cleanup
 
-To remove all resources created by this application:
+To remove all resources created by this application, run:
 
-1. Delete the CloudFormation stack:
-```
-aws cloudformation delete-stack --stack-name your-stack-name --region your-region
+```powershell
+.\cleanup-demo.ps1
 ```
 
-2. Empty and delete the S3 bucket:
-```
-aws s3 rm s3://your-bucket-name --recursive
-aws s3api delete-bucket --bucket your-bucket-name --region your-region
-```
+This script will delete all AWS resources including the CloudFormation stack, the S3 bucket, and all other resources created by the deployment.
 
 ## License
 

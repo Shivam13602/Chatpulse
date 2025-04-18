@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Lambda Functions for Real-Time Chat Application with Sentiment Insights'
+
+Parameters:
+  ConnectionsTableName:
+    Type: String
+    Default: ConnectionsTable
+    Description: Name of the DynamoDB table for storing WebSocket connections
+  
+  MessagesTableName:
+    Type: String
+    Default: MessagesTable
+    Description: Name of the DynamoDB table for storing chat messages
+  
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket where Lambda code is stored
+
+Resources:
+  # Lambda function for handling WebSocket connections
+  ConnectionManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ConnectionManager
+      Handler: connection_manager.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: lambda/connection_manager.zip
+      Runtime: python3.9
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTableName
+
+  # Lambda function for handling WebSocket disconnections
+  DisconnectManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: DisconnectManager
+      Handler: disconnect_manager.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: lambda/disconnect_manager.zip
+      Runtime: python3.9
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTableName
+
+  # Lambda function for processing and broadcasting messages
+  MessageProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MessageProcessor
+      Handler: message_processor.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: lambda/message_processor.zip
+      Runtime: python3.9
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTableName
+          MESSAGES_TABLE: !Ref MessagesTableName
+
+Outputs:
+  ConnectionManagerFunctionArn:
+    Description: ARN of the connection manager Lambda function
+    Value: !GetAtt ConnectionManagerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ConnectionManagerFunctionArn"
+
+  DisconnectManagerFunctionArn:
+    Description: ARN of the disconnect manager Lambda function
+    Value: !GetAtt DisconnectManagerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DisconnectManagerFunctionArn"
+
+  MessageProcessorFunctionArn:
+    Description: ARN of the message processor Lambda function
+    Value: !GetAtt MessageProcessorFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-MessageProcessorFunctionArn" 

@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EC2 Instance for Model Training in Real-Time Chat Application with Sentiment Insights'
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket for storing model artifacts
+  
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: EC2 instance type
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+  
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: Amazon Linux 2 AMI ID
+
+Resources:
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install -y python3 python3-pip git
+          pip3 install boto3 numpy pandas scikit-learn
+          
+          # Create directories
+          mkdir -p /home/ec2-user/model-training
+          
+          # Create model training script
+          cat > /home/ec2-user/model-training/train_model.py << 'EOF'
+          import boto3
+          import json
+          import os
+          import pickle
+          import time
+          from datetime import datetime
+          
+          # Initialize clients
+          s3 = boto3.client('s3')
+          dynamodb = boto3.resource('dynamodb')
+          
+          # Constants
+          S3_BUCKET = '${S3BucketName}'
+          MODEL_KEY = 'models/sentiment_model.pkl'
+          MESSAGES_TABLE = 'MessagesTable'
+          
+          def train_model():
+              """Train a simple sentiment analysis model and upload to S3"""
+              print(f"Starting model training at {datetime.now().isoformat()}")
+              
+              # Get messages from DynamoDB
+              try:
+                  table = dynamodb.Table(MESSAGES_TABLE)
+                  response = table.scan()
+                  messages = response.get('Items', [])
+                  
+                  # If there are no messages, use dummy data
+                  if not messages:
+                      print("No messages found in DynamoDB, using sample data")
+                      messages = [
+                          {"message": "I am happy today", "sentiment": 1},
+                          {"message": "This is great", "sentiment": 1},
+                          {"message": "I feel sad", "sentiment": -1},
+                          {"message": "This is terrible", "sentiment": -1},
+                      ]
+                  
+                  # For simplicity, we'll just create a dictionary of word-sentiment associations
+                  word_sentiment = {}
+                  for msg in messages:
+                      text = msg.get('message', '')
+                      sentiment = msg.get('sentiment', 0)
+                      
+                      if text and sentiment:
+                          words = text.lower().split()
+                          for word in words:
+                              if word not in word_sentiment:
+                                  word_sentiment[word] = []
+                              word_sentiment[word].append(sentiment)
+                  
+                  # Calculate average sentiment per word
+                  model = {}
+                  for word, sentiments in word_sentiment.items():
+                      model[word] = sum(sentiments) / len(sentiments)
+                  
+                  # Save model to file
+                  with open('/tmp/sentiment_model.pkl', 'wb') as f:
+                      pickle.dump(model, f)
+                  
+                  # Upload to S3
+                  s3.upload_file('/tmp/sentiment_model.pkl', S3_BUCKET, MODEL_KEY)
+                  print(f"Model uploaded to s3://{S3_BUCKET}/{MODEL_KEY}")
+                  
+                  return True
+              except Exception as e:
+                  print(f"Error training model: {str(e)}")
+                  return False
+          
+          if __name__ == "__main__":
+              train_model()
+          EOF
+          
+          # Set up cron job for daily model training
+          echo "0 0 * * * python3 /home/ec2-user/model-training/train_model.py > /home/ec2-user/model-training/training.log 2>&1" | crontab -
+          
+          # Run the initial training
+          python3 /home/ec2-user/model-training/train_model.py > /home/ec2-user/model-training/initial_training.log 2>&1
+      Tags:
+        - Key: Name
+          Value: ModelTrainingInstance
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for model training EC2 instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+  
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - LabRole
+
+Outputs:
+  EC2InstanceId:
+    Description: ID of the EC2 instance for model training
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2InstanceId" 

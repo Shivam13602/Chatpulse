@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EventBridge Resources for Real-Time Chat Application with Sentiment Insights'
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket where model artifacts are stored
+
+Resources:
+  # EventBridge Event Bus
+  ChatEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: RealTimeChatEventBus
+
+  # EventBridge Rule for model retraining
+  ModelRetrainingRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ModelRetrainingRule
+      Description: Triggers daily model retraining
+      ScheduleExpression: rate(1 day)
+      State: ENABLED
+      EventBusName: !Ref ChatEventBus
+      Targets:
+        - Arn: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ModelTrainingTrigger
+          Id: ModelTrainingTarget
+
+  # Lambda function for triggering model retraining
+  ModelTrainingTriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ModelTrainingTrigger
+      Handler: index.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Runtime: python3.9
+      Timeout: 30
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import os
+          import json
+          import time
+          
+          # Initialize clients
+          ec2 = boto3.client('ec2')
+          
+          def lambda_handler(event, context):
+              """
+              Lambda function triggered by EventBridge to initiate model retraining
+              """
+              try:
+                  # Get EC2 instance ID by tag
+                  response = ec2.describe_instances(
+                      Filters=[
+                          {
+                              'Name': 'tag:Name',
+                              'Values': ['ModelTrainingInstance']
+                          },
+                          {
+                              'Name': 'instance-state-name',
+                              'Values': ['running', 'stopped']
+                          }
+                      ]
+                  )
+                  
+                  # Extract instance ID
+                  instance_id = None
+                  for reservation in response['Reservations']:
+                      for instance in reservation['Instances']:
+                          instance_id = instance['InstanceId']
+                          instance_state = instance['State']['Name']
+                          break
+                      if instance_id:
+                          break
+                  
+                  if not instance_id:
+                      print("Model training instance not found")
+                      return {
+                          'statusCode': 404,
+                          'body': json.dumps('Model training instance not found')
+                      }
+                  
+                  # If instance is stopped, start it
+                  if instance_state == 'stopped':
+                      print(f"Starting instance {instance_id}")
+                      ec2.start_instances(InstanceIds=[instance_id])
+                      # Wait for instance to start
+                      waiter = ec2.get_waiter('instance_running')
+                      waiter.wait(InstanceIds=[instance_id])
+                  
+                  # Run the training command via SSM Run Command
+                  print(f"Triggering model training on instance {instance_id}")
+                  ssm = boto3.client('ssm')
+                  response = ssm.send_command(
+                      InstanceIds=[instance_id],
+                      DocumentName="AWS-RunShellScript",
+                      Parameters={
+                          'commands': [
+                              'python3 /home/ec2-user/model-training/train_model.py > /home/ec2-user/model-training/scheduled_training.log 2>&1'
+                          ]
+                      }
+                  )
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Model training triggered successfully')
+                  }
+                  
+              except Exception as e:
+                  print(f"Error triggering model training: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(f'Error: {str(e)}')
+                  }
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref S3BucketName
+
+  # Permission for EventBridge to invoke Lambda
+  ModelTrainingTriggerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ModelTrainingTriggerFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ModelRetrainingRule.Arn
+
+Outputs:
+  EventBusName:
+    Description: Name of the EventBridge event bus
+    Value: !Ref ChatEventBus
+    Export:
+      Name: !Sub "${AWS::StackName}-EventBusName"
+  
+  ModelTrainingTriggerFunctionArn:
+    Description: ARN of the model training trigger Lambda function
+    Value: !GetAtt ModelTrainingTriggerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ModelTrainingTriggerFunctionArn" 

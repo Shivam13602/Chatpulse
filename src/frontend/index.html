@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern Chat with Sentiment Analysis</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="modern-chat.css">
+</head>
+<body>
+    <div class="container">
+        <div class="chat-container">
+            <!-- Login Modal -->
+            <div id="loginModal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 class="modal-title">Join the Chat</h2>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="usernameInput" class="form-label">Username</label>
+                            <input type="text" id="usernameInput" placeholder="Enter your username" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="colorInput" class="form-label">Choose your color</label>
+                            <input type="color" id="colorInput" value="#4a6fff">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button id="loginButton" class="btn btn-primary">Join Chat</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Connection Status -->
+            <div id="connectionStatus" class="connection-status">
+                <i class="connection-icon fas fa-circle"></i>
+                <span id="connectionStatusText">Connecting...</span>
+            </div>
+
+            <!-- Main Chat -->
+            <div class="chat-main">
+                <!-- Sidebar -->
+                <div id="sidebar" class="sidebar">
+                    <div class="sidebar-header">
+                        <h3 class="sidebar-title">Online Users</h3>
+                        <button id="toggleDarkMode" class="btn btn-circle btn-outline">
+                            <i class="fas fa-moon"></i>
+                        </button>
+                    </div>
+                    <ul id="userList" class="user-list">
+                        <!-- Users will be populated here -->
+                    </ul>
+                </div>
+
+                <!-- Chat Content -->
+                <div class="chat-content">
+                    <div class="chat-header">
+                        <div class="chat-header-title">
+                            <span id="roomName">Chat Room</span>
+                            <span id="userCount">(0)</span>
+                        </div>
+                        <div class="chat-header-actions">
+                            <button id="toggleSidebar" class="btn btn-outline">
+                                <i class="fas fa-users"></i>
+                            </button>
+                            <button id="logoutButton" class="btn btn-outline">
+                                <i class="fas fa-sign-out-alt"></i> Logout
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="chatArea" class="chat-area">
+                        <!-- Messages will be populated here -->
+                    </div>
+
+                    <div class="sentiment-legend">
+                        <div class="sentiment-info">
+                            <i class="fas fa-info-circle"></i>
+                            <div class="sentiment-tooltip">
+                                Messages are analyzed for sentiment using natural language processing. 
+                                Positive, neutral, or negative indicators show the emotional tone of each message.
+                            </div>
+                        </div>
+                        <div class="sentiment-item">
+                            <div class="sentiment-indicator positive"></div>
+                            <span>Positive</span>
+                        </div>
+                        <div class="sentiment-item">
+                            <div class="sentiment-indicator neutral"></div>
+                            <span>Neutral</span>
+                        </div>
+                        <div class="sentiment-item">
+                            <div class="sentiment-indicator negative"></div>
+                            <span>Negative</span>
+                        </div>
+                    </div>
+
+                    <div id="typingIndicator" class="typing-indicator hidden">
+                        <span>Someone is typing...</span>
+                    </div>
+
+                    <div class="message-form">
+                        <div class="message-input-container">
+                            <textarea id="messageInput" class="message-input" placeholder="Type a message..." rows="1"></textarea>
+                            <button id="emojiButton" class="emoji-button">
+                                <i class="far fa-smile"></i>
+                            </button>
+                            <button id="sendButton" class="btn btn-primary btn-circle">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- Emoji Picker -->
+                        <div id="emojiPicker" class="emoji-picker hidden">
+                            <div class="emoji-picker-header">
+                                <span class="emoji-picker-title">Emojis</span>
+                                <button id="closeEmojiButton" class="emoji-close">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div id="emojiList" class="emoji-list">
+                                <!-- Emojis will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="modern-chat.js"></script>
+</body>
+</html> 

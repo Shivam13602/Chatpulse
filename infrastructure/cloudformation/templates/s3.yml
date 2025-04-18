@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 Bucket for Real-Time Chat Application with Sentiment Insights'
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Default: 'real-time-chat-storage'
+    Description: Name of the S3 bucket for storing assets, lambda code, and model data
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${S3BucketName}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+Outputs:
+  S3BucketName:
+    Description: Name of the S3 bucket for storing assets
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-S3BucketName" 

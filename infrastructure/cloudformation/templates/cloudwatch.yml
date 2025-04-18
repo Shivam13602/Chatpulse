@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudWatch Resources for Real-Time Chat Application with Sentiment Insights'
+
+Parameters:
+  WebSocketApiId:
+    Type: String
+    Description: ID of the WebSocket API
+
+Resources:
+  # Dashboard for monitoring key metrics
+  CloudWatchDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: RealTimeChatDashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApiGateway", "Count", "ApiId", "${WebSocketApiId}", "Stage", "prod", "Resource", "$connect" ],
+                  [ "...", "$disconnect" ],
+                  [ "...", "sendmessage" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "WebSocket API Request Count",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "ConnectionManager" ],
+                  [ "...", "DisconnectManager" ],
+                  [ "...", "MessageProcessor" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Invocations",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "ConnectionManager" ],
+                  [ "...", "DisconnectManager" ],
+                  [ "...", "MessageProcessor" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Duration",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "ConnectionManager" ],
+                  [ "...", "DisconnectManager" ],
+                  [ "...", "MessageProcessor" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors",
+                "period": 300
+              }
+            }
+          ]
+        }
+
+  # Alarm for Lambda errors
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: RealTimeChatLambdaErrorAlarm
+      AlarmDescription: Alarm when Lambda functions encounter errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: MessageProcessor
+      TreatMissingData: notBreaching
+
+  # Alarm for API Gateway latency
+  ApiGatewayLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: RealTimeChatApiLatencyAlarm
+      AlarmDescription: Alarm when API Gateway latency exceeds threshold
+      MetricName: IntegrationLatency
+      Namespace: AWS/ApiGateway
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref WebSocketApiId
+        - Name: Stage
+          Value: prod
+      TreatMissingData: notBreaching
+
+Outputs:
+  DashboardName:
+    Description: Name of the CloudWatch Dashboard
+    Value: !Ref CloudWatchDashboard
+    Export:
+      Name: !Sub "${AWS::StackName}-DashboardName" 
